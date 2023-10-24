@@ -1,0 +1,63 @@
+fraud <- read.csv("application_data.csv", header = T)
+#We first see a small snapshot of the dataset then use the summary function to
+get baselines for the independent variables and the one dependent variable
+(TARGET)
+head(fraud[1:10])
+summary(fraud[1:10])
+#Here we properly dummy code the dependent variable
+fraud$TARGET <- as.factor(fraud$TARGET)
+levels(fraud$TARGET) <- c("No", "Yes")
+fraud$TARGET <- relevel(fraud$TARGET, ref="Yes")
+#Noisy data removal
+fraud <- fraud[, !grepl("_MEDI$", names(fraud))]
+fraud <- fraud[, !grepl("_MODE$", names(fraud))]
+fraud <- fraud[, !grepl("_AVG$", names(fraud))]
+fraud <- fraud %>% select(-contains("FLAG_DOCUMENT"))
+fraud <- subset(fraud, select = -c(FLAG_EMAIL, FLAG_PHONE, FLAG_WORK_PHONE,
+FLAG_CONT_MOBILE, FLAG_EMP_PHONE, FLAG_MOBIL))
+fraud$OWN_CAR_AGE <- NULL
+fraud$EXT_SOURCE_1 <- NULL
+drops <- c("REG_REGION_NOT_LIVE_REGION", "REG_REGION_NOT_WORK_REGION",
+"LIVE_REGION_NOT_WORK_REGION", "REG_CITY_NOT_LIVE_CITY",
+"REG_CITY_NOT_WORK_CITY", "LIVE_CITY_NOT_WORK_CITY", "EXT_SOURCE_2",
+"EXT_SOURCE_3", "OBS_30_CNT_SOCIAL_CIRCLE", "OBS_60_CNT_SOCIAL_CIRCLE",
+"AMT_REQ_CREDIT_BUREAU_HOUR", "AMT_REQ_CREDIT_BUREAU_WEEK",
+"AMT_REQ_CREDIT_BUREAU_MON")
+fraud <- fraud[ , !(names(fraud) %in% drops)]
+#check progress on cleaning
+summary(fraud[1:10])
+#Lets see some of the variables that we think are important
+ggplot(data = fraud, aes(x = TARGET)) + geom_bar() + geom_text(stat = 'count',
+aes(label=..count..), vjust=0)
+ggplot(data = fraud, aes(x = as.factor(CODE_GENDER))) + geom_bar() +
+geom_text(stat = 'count', aes(label = ..count..), vjust = 0) + xlab("Female =
+0 & Male = 1")
+ggplot(data = fraud, aes(x = as.factor(FLAG_OWN_CAR))) + geom_bar() +
+geom_text(stat = 'count', aes(label = ..count..), vjust = 0) + xlab("No = 0 &
+Yes = 1")
+ggplot(data = fraud, aes(x = AMT_INCOME_TOTAL)) + geom_histogram() +
+xlab("Income")
+#We notice some outliers in the income category, so we rid of them using the
+interquartile approach
+Q1 <- quantile(fraud$AMT_INCOME_TOTAL, .25)
+Q3 <- quantile(fraud$AMT_INCOME_TOTAL, .75)
+IQR <- IQR(fraud$AMT_INCOME_TOTAL)
+fraud <- subset(fraud, fraud$AMT_INCOME_TOTAL> (Q1 - 1.5*IQR) &
+fraud$AMT_INCOME_TOTAL < (Q3 + 1.5*IQR))
+#View the distribution
+#plot(fraud$AMT_INCOME_TOTAL)
+#Now we can start converting all of the variables to dummy variables if
+necessary
+str(fraud[1:10])
+#This feature should change all of our character type variables to factors
+fraud[sapply(fraud, is.character)] <- lapply(fraud[sapply(fraud,
+is.character)], as.factor)
+#Now we want to change to dummy variables using an ifelse statement
+#1 if Male, 0 if else
+fraud$CODE_GENDER <- ifelse(fraud$CODE_GENDER == 'M', 1, 0)
+#1 if own car, 0 if else
+fraud$FLAG_OWN_CAR <- ifelse(fraud$FLAG_OWN_CAR == 'Y', 1, 0)
+#1 if own realty, 0 if else
+fraud$FLAG_OWN_REALTY <- ifelse(fraud$FLAG_OWN_REALTY == 'Y', 1, 0)
+#fill any N/A values with 0
+fraud[is.na(fraud)] = 0
