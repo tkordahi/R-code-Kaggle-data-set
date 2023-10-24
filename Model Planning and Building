@@ -1,0 +1,160 @@
+#We have to start the process by setting our seed so we can replicate if
+necessary
+set.seed(155)
+#lets use a condensed set of variables that takes out some of the factors that
+might slow down the cross validation process
+fraud<- fraud[,-c( 3, 12, 13, 14, 15, 16, 22, 26, 28)]
+#We want to keep 75% of the data since our data set is very large (218764 &
+72922)
+train.index <- sample(nrow(fraud), nrow(fraud) * .75)
+#Now we can split the data
+fraud.train <- fraud[train.index,]
+#Note to not touch until after the training
+fraud.test <- fraud[-train.index,]
+#Now we identify correlated predictors
+#fraud.cor <- cor(fraud.train[,-2]) #omitting DV
+#corrplot(fraud.cor, order="hclust")
+#corrgram(fraud.cor, upper.panel = panel.cor, lower.panel = panel.pie)
+#Lets find the most correlated variables (if any)
+#highlyCorr <- findCorrelation(fraud.cor, cutoff=.8)
+#corrplot(cor(fraud.train[,-c(1, 2, 5, 9, 17, 19, 20, 21, 22, 23, 24, 25, 26,
+27, 28, 29, 30 )]))
+fraud <- fraud[,-c(1, 9, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 )]
+fraud.train <- fraud.train[,-c(1, 9, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+28, 29, 30) ]
+fraud.test <- fraud.test[,-c(1, 9, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+29, 30 )]
+#Setting up the cross validation
+set.seed(155)
+ctrl <- trainControl(method = "cv", number = 10, summaryFunction =
+twoClassSummary, classProbs = TRUE, savePredictions = T )
+model_weights <- ifelse(fraud.train$TARGET == "YES",
+(1 / table(fraud.train$TARGET)[1]) * 0.8,
+(1 / table(fraud.train$TARGET)[2]) * 0.1)
+##Logistic Regression
+set.seed(155)
+fraud.glm <- train(TARGET ~ ., data = fraud.train, method = "glm", weights =
+model_weights, family = "binomial", metric = "ROC", trControl = ctrl)
+fraud.glm
+varImp(fraud.glm)
+summary(fraud.glm)
+confusionMatrix(fraud.glm$pred$pred, fraud.glm$pred$obs)
+##Linear Discriminant Analysis
+set.seed(155)
+fraud.lda <- train(TARGET ~ ., data = fraud.train, weights = model_weights,
+method="lda", metric="ROC", trControl=ctrl)
+fraud.lda
+varImp(fraud.lda)
+confusionMatrix(fraud.lda$pred$pred, fraud.lda$pred$obs)
+##Quadratic Discriminant Analysis
+set.seed(155)
+fraud.qda <- train(TARGET ~ ., data=fraud.train, method="qda", metric="ROC",
+weights = model_weights, trControl=ctrl)
+fraud.qda
+varImp(fraud.qda)
+getTrainPerf(fraud.qda)
+##Stochastic Gradient boosting model (weighted)
+set.seed(155)
+fraud.gbm <- train(TARGET ~ ., data = fraud.train, method = "gbm", verbose =
+FALSE, weights = model_weights, metric = "ROC", trControl = ctrl)
+confusionMatrix(fraud.gbm$pred$pred, fraud.gbm$pred$obs)
+#lets compare all re-sampling approaches
+fraud.models <- list("logit"=fraud.glm, "lda"=fraud.lda, "qda"=fraud.qda,
+"gbm" = fraud.gbm)
+fraud.resamples = resamples(fraud.models)
+#plot performance comparisons
+bwplot(fraud.resamples, metric="ROC")
+bwplot(fraud.resamples, metric="Sens") #predicting default dependent on
+threshold
+bwplot(fraud.resamples, metric="Spec")
+fraud.glm.roc<- roc(response= fraud.glm$pred$obs,
+predictor=fraud.glm$pred$Yes)
+fraud.lda.roc<- roc(response= fraud.lda$pred$obs,
+predictor=fraud.lda$pred$Yes)
+fraud.qda.roc<- roc(response= fraud.qda$pred$obs,
+predictor=fraud.qda$pred$Yes)
+fraud.gbm.roc<- roc(response= fraud.gbm$pred$obs,
+predictor=fraud.gbm$pred$Yes)
+plot(fraud.glm.roc, legacy.axes=T)
+plot(fraud.lda.roc, add=T, col="Blue")
+plot(fraud.qda.roc, add=T, col="Green")
+plot(fraud.gbm.roc, add=T, col="Red")
+legend(x=.2, y=.7, legend=c("Logit", "LDA", "QDA", "GBM"),
+col=c("black","blue","green", "red"),lty=1)
+test.pred.prob <- predict(fraud.qda, fraud.test, type="prob")
+test.pred.class <- predict(fraud.qda, fraud.test)
+#calculate performance with confusion matrix
+confusionMatrix(test.pred.class, fraud.test$TARGET)
+#lets identify a more optimal cut-off (current resampled confusion matrix),
+low sensitivity
+#confusionMatrix(fraud.qda$pred$pred, fraud.qda$pred$obs)
+#fraud.qda.Thresh<- coords(fraud.qda.roc, x = "best", best.method =
+"closest.topleft")
+#fraud.qda.Thresh #sensitivity increases to 88% by reducing threshold to .0396
+from .5
+#lets make new predictions with this cut-off and recalculate confusion matrix
+#fraud.qda.newpreds <- factor(ifelse(fraud.qda$pred$Yes > fraud.qda.Thresh[1],
+"Yes", "No"))
+#recalculate confusion matrix with new cut off predictions
+#confusionMatrix(fraud.qda.newpreds, fraud.qda$pred$obs)
+#testing hypotheses
+#IH3 children increase payment difficulties
+haschildren <- filter(fraud, CNT_CHILDREN >= 1)
+prop.table(table(haschildren$TARGET))
+nochildren <- filter(fraud, CNT_CHILDREN == 0)
+prop.table(table(nochildren$TARGET))
+ih3 <- cbind(prop.table(table(haschildren$TARGET)),
+prop.table(table(nochildren$TARGET)))
+barplot(ih3, beside = T, names.arg = c("has children", "no children"),
+main = "IH3: Proportion Difficulty vs No difficulty comparing having
+children or not")
+#IH4 clients with above avg loan amount more likely to have payment
+difficulties
+aboveloan <- filter(fraud, AMT_CREDIT > sum(AMT_CREDIT)/n())
+prop.table(table(aboveloan$TARGET))
+belowloan <- filter(fraud, AMT_CREDIT <= sum(AMT_CREDIT)/n())
+prop.table(table(belowloan$TARGET))
+ih4 <- cbind(prop.table(table(aboveloan$TARGET)),
+prop.table(table(belowloan$TARGET)))
+barplot(ih4, beside = T, names.arg = c("above avg loan", "below avg loan"),
+main = "IH4: Proportion Difficulty vs No difficulty comparing Loan
+Amt")
+#IH5 clients with above avg age less likely to have payment difficulties
+aboveage <- filter(fraud, DAYS_BIRTH < sum(DAYS_BIRTH)/n())
+prop.table(table(aboveage$TARGET))
+belowage <- filter(fraud, DAYS_BIRTH >= sum(DAYS_BIRTH)/n())
+prop.table(table(belowage$TARGET))
+ih5 <- cbind(prop.table(table(aboveage$TARGET)),
+prop.table(table(belowage$TARGET)))
+barplot(ih5, beside = T, names.arg = c("above avg age", "below avg age"),
+main = "IH5: Proportion Difficulty vs No difficulty comparing Ages")
+#IH6 owning realty increases likelihood of loan default
+ownrealty <- filter(fraud, FLAG_OWN_REALTY == 1)
+prop.table(table(ownrealty$TARGET))
+norealty <- filter(fraud, FLAG_OWN_REALTY == 0)
+prop.table(table(norealty$TARGET))
+ih6 <- cbind(prop.table(table(ownrealty$TARGET)),
+prop.table(table(norealty$TARGET)))
+barplot(ih6, beside = T, names.arg = c("own realty", "no realty"), 
+main = "IH6: Proportion Difficulty vs No difficulty comparing Realty ownership")
+#IH7 client employed less days than avg is more likely to default
+lessdays <- filter(fraud, DAYS_EMPLOYED > sum(DAYS_EMPLOYED)/n())
+prop.table(table(lessdays$TARGET))
+abovedays <- filter(fraud, DAYS_EMPLOYED <= sum(DAYS_EMPLOYED)/n())
+prop.table(table(abovedays$TARGET))
+ih7 <- cbind(prop.table(table(lessdays$TARGET)),
+prop.table(table(abovedays$TARGET)))
+barplot(ih7, beside = T, names.arg = c("less than avg days employed", "more
+than avg days employed"),
+main = "IH7: Proportion Difficulty vs No difficulty comparing
+Employment length")
+#IH8 owning a car is a good predictor of loan default
+owncar <- filter(fraud, FLAG_OWN_CAR == 1)
+prop.table(table(owncar$TARGET))
+nocar <- filter(fraud, FLAG_OWN_CAR == 0)
+prop.table(table(nocar$TARGET))
+ih8 <- cbind(prop.table(table(owncar$TARGET)),
+prop.table(table(nocar$TARGET)))
+barplot(ih8, beside = T, names.arg = c("own car", "no car"),
+main = "IH8: Proportion Difficulty vs No difficulty comparing Car
+ownership")
